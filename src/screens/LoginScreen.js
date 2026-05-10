@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   Image,
   SafeAreaView,
   StyleSheet,
@@ -9,15 +10,66 @@ import {
   View
 } from 'react-native';
 
+import * as SecureStore from 'expo-secure-store';
+
 import CustomButton from '../components/customButton';
 import { COLORS } from '../constants/colors';
 import { TYPOGRAPHY } from '../constants/typography';
+
+import { getGoal, login } from '../api/socialStairApi';
 
 const logoImage = require('../../assets/images/logo.png');
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    // 1. 빈칸 검사
+    if (!email || !password) {
+      Alert.alert('알림', '이메일과 비밀번호를 모두 입력해주세요.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await login(email, password); // 로그인 API 호출 [cite: 22]
+      
+      // 1. 회원가입 후 최초 로그인 여부 확인
+      // 로컬 저장소에 'hasSeenInitial' 값이 없으면 최초 로그인으로 간주
+      const hasSeenInitial = await SecureStore.getItemAsync('hasSeenInitial');
+      
+      if (!hasSeenInitial) {
+        // 최초 로그인이라면 InitialScreen으로 이동
+        await SecureStore.setItemAsync('hasSeenInitial', 'true');
+        navigation.replace('Initial');
+        return;
+      }
+  
+      // 2. 이번 주 목표 설정 여부 확인 
+      try {
+        const goalData = await getGoal();
+        if (!goalData || !goalData.goalFloors) {
+          // 목표가 없으면 목표 설정 화면(StartScreen)으로
+          navigation.replace('Start');
+        } else {
+          // 목표가 이미 있으면 홈으로
+          navigation.replace('MainTab');
+        }
+      } catch (goalError) {
+        // 목표 데이터가 없어서 404 등 에러가 발생한 경우, 무조건 목표 설정 화면으로
+        console.log('목표 조회 에러 (아마 목표 미설정 상태):', goalError.response?.status);
+        navigation.replace('Start'); 
+      }
+  
+    } catch (error) {
+      Alert.alert('로그인 실패', '정보를 확인해주세요.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -56,11 +108,9 @@ export default function LoginScreen({ navigation }) {
           />
           
           <CustomButton 
-            title="로그인" 
-            onPress={() => {
-              // 임시로 바로 화면이 넘어가도록 설정 (로그인 API)
-              navigation.navigate('Initial');
-            }}
+            title={loading ? "로그인 중..." : "로그인"}
+            onPress={handleLogin} 
+            disabled={loading} 
             style={{ marginTop: 20 }}
           />
           

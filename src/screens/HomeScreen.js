@@ -1,4 +1,5 @@
-import React from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -7,56 +8,179 @@ import {
   View,
 } from 'react-native';
 
-// 아이콘 라이브러리 불러오기
 import { Feather } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
+import * as SecureStore from 'expo-secure-store';
+
+import { getHomeStats, updateFcmToken } from '../api/socialStairApi';
 import { COLORS } from '../constants/colors';
 import { TYPOGRAPHY } from '../constants/typography';
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
 export default function HomeScreen() {
+  const [nickname, setNickname] = useState('사용자');
+  const [goalData, setGoalData] = useState({ currentFloors: 0, goalFloors: 0, achievementRate: 0 });
+  const [streak, setStreak] = useState(0); 
+  const [lastWeekRate, setLastWeekRate] = useState(0); 
+  const [notifications, setNotifications] = useState([]);
+
+  const getRelativeTime = (timestamp) => {
+    const now = Date.now();
+    const diffInSeconds = Math.floor((now - timestamp) / 1000);
+
+    if (diffInSeconds < 60) return '방금 전';
+    const diffInMinutes = Math.floor(diffInSeconds / 60);
+    if (diffInMinutes < 60) return `${diffInMinutes}분 전`;
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) return `${diffInHours}시간 전`;
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays < 7) return `${diffInDays}일 전`;
+    const diffInWeeks = Math.floor(diffInDays / 7);
+    return `${diffInWeeks}주 전`;
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      const fetchHomeData = async () => {
+        try {
+          const savedName = await SecureStore.getItemAsync('userNickname');
+          if (savedName) setNickname(savedName);
+
+          const statsData = await getHomeStats();
+          if (statsData && statsData.members) {
+            const myData = statsData.members.find(m => m.nickname === savedName);
+            if (myData) {
+              setGoalData({
+                currentFloors: myData.currentFloors || 0,
+                goalFloors: myData.goalFloors || 0,
+                achievementRate: myData.achievementRate || 0,
+              });
+            }
+          }
+        } catch (error) {
+          console.error("홈 데이터 새로고침 실패:", error);
+        }
+      };
+      fetchHomeData();
+      return () => {}; 
+    }, [nickname]) 
+  );
+
+  useEffect(() => {
+    const registerForPushNotificationsAsync = async () => {
+      if (Device.isDevice) {
+        try {
+          const { status: existingStatus } = await Notifications.getPermissionsAsync();
+          let finalStatus = existingStatus;
+          
+          if (existingStatus !== 'granted') {
+            const { status } = await Notifications.requestPermissionsAsync();
+            finalStatus = status;
+          }
+          if (finalStatus !== 'granted') return;
+
+          const tokenData = await Notifications.getExpoPushTokenAsync().catch((err) => {
+            console.log('Expo Go 환경에서는 푸시 토큰을 가져올 수 없습니다 (정상입니다).', err.message);
+            return null;
+          });
+
+          if (tokenData && tokenData.data) {
+            const token = tokenData.data;
+            const userId = await SecureStore.getItemAsync('userId'); 
+            if (userId) {
+              await updateFcmToken(userId, token);
+              console.log('서버에 FCM 토큰 등록 완료:', token);
+            }
+          }
+        } catch (e) {
+          console.log('푸시 알림 설정 중 에러 발생 (Expo Go 제한):', e);
+        }
+      } else {
+        console.log('푸시 알림은 실제 기기에서만 작동합니다.');
+      }
+    };
+
+    registerForPushNotificationsAsync();
+
+    const loadSavedNotifications = async () => {
+      try {
+        const saved = await AsyncStorage.getItem('savedNotifications');
+        if (saved) setNotifications(JSON.parse(saved));
+      } catch (e) {
+        console.error('알림 불러오기 에러:', e);
+      }
+    };
+    loadSavedNotifications();
+
+    const notificationListener = Notifications.addNotificationReceivedListener(async (notification) => {
+      const nowTime = Date.now();
+      
+      const newNoti = {
+        id: nowTime.toString(), 
+        timestamp: nowTime, // 시간에 쓸 고유 타임스탬프
+        type: 'info', 
+        title: notification.request.content.title || '성찰 일지 알림',
+        body: notification.request.content.body || '새로운 알림이 도착했습니다.',
+      };
+
+      setNotifications((prev) => {
+        const updatedList = [newNoti, ...prev];
+        AsyncStorage.setItem('savedNotifications', JSON.stringify(updatedList));
+        return updatedList;
+      });
+    });
+
+    return () => {
+      notificationListener.remove();
+    };
+  }, []);
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* 1. 상단 환영 인사 영역 */}
+        {/* 상단 환영 인사 영역 */}
         <View style={styles.headerContainer}>
-          {/* 로그인한 유저의 이름 변수가 들어갈 자리 */}
-          <Text style={styles.subHeader}>어서오세요, 여지훈님</Text>
+          <Text style={styles.subHeader}>어서오세요, {nickname}님</Text>
           <Text style={styles.mainHeader}>오늘도 계단 한 층 더!</Text>
         </View>
 
-        {/* 2. 주간 목표 카드 (파란색 메인 카드) */}
+        {/* 주간 목표 카드 */}
         <View style={styles.goalCard}>
-          
-          
           <View style={styles.accumulateContainer}>
             <Text style={styles.accumulateLabel}>이번 주 누적</Text>
             <View style={styles.accumulateValueRow}>
-              <Text style={styles.accumulateNumber}>12</Text>
+              <Text style={styles.accumulateNumber}>{goalData.currentFloors}</Text>
               <Text style={styles.accumulateUnit}>층</Text>
             </View>
           </View>
 
-          
           <View style={styles.trendIconContainer}>
             <Feather name="trending-up" size={24} color={COLORS.white} />
           </View>
 
-          
           <View style={styles.progressContainer}>
             <View style={styles.progressBackground}>
-              <View style={[styles.progressFill, { width: '40%' }]} />
+              <View style={[styles.progressFill, { width: `${Math.min(goalData.achievementRate, 100)}%` }]} />
             </View>
             <View style={styles.progressTextRow}>
               <Text style={styles.progressLabel}>주간 목표</Text>
-              <Text style={styles.progressValue}>6/15층</Text>
+              <Text style={styles.progressValue}>{goalData.currentFloors}/{goalData.goalFloors}층</Text>
             </View>
           </View>
-          
         </View>
 
-        {/* 3. 통계 카드 (연속 기록 & 달성도) */}
+        {/* 통계 카드 */}
         <View style={styles.statsRow}>
-          {/* 연속 기록 카드 */}
           <View style={styles.statCard}>
             <View style={styles.statHeader}>
               <View style={styles.iconCircle}>
@@ -65,12 +189,11 @@ export default function HomeScreen() {
               <Text style={styles.statLabel}>연속 기록</Text>
             </View>
             <View style={styles.statValueRow}>
-              <Text style={styles.statNumber}>3</Text>
+              <Text style={styles.statNumber}>{streak}</Text>
               <Text style={styles.statUnit}>일</Text>
             </View>
           </View>
 
-          {/* 달성도 카드 */}
           <View style={styles.statCard}>
             <View style={styles.statHeader}>
               <View style={styles.iconCircle}>
@@ -79,60 +202,45 @@ export default function HomeScreen() {
               <Text style={styles.statLabel}>지난 주 달성도</Text>
             </View>
             <View style={styles.statValueRow}>
-              <Text style={styles.statNumber}>20</Text>
+              <Text style={styles.statNumber}>{lastWeekRate}</Text>
               <Text style={styles.statUnit}>%</Text>
             </View>
           </View>
         </View>
 
-        {/* 4. 알림 리스트 영역 */}
+        {/* 알림 리스트 영역 */}
         <View style={styles.notificationSection}>
           <Text style={styles.sectionTitle}>성찰 일지 알림</Text>
-          
           <View style={styles.notificationBox}>
-            {/* 알림 아이템 1 (에러/경고) */}
-            <View style={styles.notiItem}>
-              <Feather name="alert-triangle" size={18} color="#F24242" />
-              <View style={styles.notiContent}>
-                <View style={styles.notiHeader}>
-                  <Text style={styles.notiCategory}>성찰 일지를 작성해주세요!</Text>
-                  <Text style={styles.notiTime}>3시간</Text>
-                </View>
-                <Text style={styles.notiDescription}>05.06(월) 성찰 일지를 작성하지 않았습니다</Text>
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            {/* 알림 아이템 2 (일반 알림) */}
-            <View style={styles.notiItem}>
-              <Feather name="bell" size={18} color="#F5BF35" />
-              <View style={styles.notiContent}>
-                <View style={styles.notiHeader}>
-                  <Text style={styles.notiCategory}>이번 주 엘리베이터 대신 계단을 이용해 볼까요?</Text>
-                  <Text style={styles.notiTime}>10시간</Text>
-                </View>
-                <Text style={styles.notiDescription}>
-                  계단 이용은 별도의 운동 시간 없이 신체 활동을 늘리는 효과적인 방법입니다. (Eves & Webb, 2006)
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            {/* 알림 아이템 3 (일반 알림) */}
-            <View style={styles.notiItem}>
-              <Feather name="bell" size={18} color="#F5BF35" />
-              <View style={styles.notiContent}>
-                <View style={styles.notiHeader}>
-                  <Text style={styles.notiCategory}>오늘은 계단을 이용해 스트레칭을 해보시면 어떨까요?</Text>
-                  <Text style={styles.notiTime}>어제</Text>
-                </View>
-                <Text style={styles.notiDescription}>
-                  계단을 활용한 스트레칭 사진을 연구원에게 보내주세요. 작은 선물이 있을지도~?😉
-                </Text>
-              </View>
-            </View>
+            {notifications.length === 0 ? (
+              <Text style={styles.notiDescription}>새로운 알림이 없습니다</Text>
+            ) : (
+              notifications.map((noti, index) => {
+                const isAlert = noti.type === 'alert'; 
+                return (
+                  <React.Fragment key={noti.id}>
+                    <View style={styles.notiItem}>
+                      <Feather 
+                        name={isAlert ? "alert-triangle" : "bell"} 
+                        size={18} 
+                        color={isAlert ? "#F24242" : "#F5BF35"} 
+                      />
+                      <View style={styles.notiContent}>
+                        <View style={styles.notiHeader}>
+                          <Text style={styles.notiCategory}>{noti.title}</Text>
+                          {/* 💡 여기서 시간에 마법(getRelativeTime)을 걸어줍니다! */}
+                          <Text style={styles.notiTime}>
+                            {noti.timestamp ? getRelativeTime(noti.timestamp) : noti.time}
+                          </Text>
+                        </View>
+                        <Text style={styles.notiDescription}>{noti.body}</Text>
+                      </View>
+                    </View>
+                    {index < notifications.length - 1 && <View style={styles.divider} />}
+                  </React.Fragment>
+                );
+              })
+            )}
           </View>
         </View>
 
@@ -337,7 +445,7 @@ const styles = StyleSheet.create({
   },
   notiDescription: {
     fontFamily: 'Pretendard-Medium',
-    color: COLORS.black,
+    color: COLORS.gray,
     fontSize: 13,
     lineHeight: 18,
     letterSpacing: 13 * -0.025,

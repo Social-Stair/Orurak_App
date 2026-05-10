@@ -1,22 +1,27 @@
 import React, { useState } from 'react';
 import {
+    ActivityIndicator,
+    Alert,
     Image,
     SafeAreaView,
     StyleSheet,
     Text,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/colors';
 import { TYPOGRAPHY } from '../constants/typography';
 
+import { setGoal } from '../api/socialStairApi';
+
 const goalImage = require('../../assets/images/goal.png');
 
-export default function GoalSettingScreen({ navigation }) {
+export default function StartScreen({ navigation }) {
   // 목표 층수 상태 관리 (기본값 1층)
   const [floorCount, setFloorGoal] = useState(1);
+  const [loading, setLoading] = useState(false); // 로딩 상태 관리
 
   const handleMinus = () => {
     // 1층 밑으로는 내려가지 않도록 방지
@@ -29,9 +34,22 @@ export default function GoalSettingScreen({ navigation }) {
     setFloorGoal(floorCount + 1);
   };
 
-  const handleStart = () => {
-    console.log('설정된 이번 주 목표 층수:', floorCount);
-    navigation.navigate('MainTab'); 
+  const handleStart = async () => {
+    setLoading(true); // 로딩 시작
+    try {
+      // 1. 백엔드로 목표 층수 전송
+      await setGoal(floorCount);
+      
+      console.log('목표 설정 성공:', floorCount);
+
+      // 2. 성공 시 메인 화면(홈)으로 이동
+      navigation.replace('MainTab'); 
+    } catch (error) {
+      console.error('목표 설정 실패:', error);
+      Alert.alert('오류', '목표를 설정하는 중 문제가 발생했습니다. 다시 시도해주세요.');
+    } finally {
+      setLoading(false); // 로딩 종료
+    }
   };
 
   return (
@@ -84,12 +102,17 @@ export default function GoalSettingScreen({ navigation }) {
 
         {/* 5. 시작하기 버튼 */}
         <View style={styles.actionContainer}>
-          <TouchableOpacity 
-            style={styles.startButton} 
+        <TouchableOpacity 
+            style={[styles.startButton, loading && { backgroundColor: COLORS.gray }]} 
             onPress={handleStart}
             activeOpacity={0.8}
+            disabled={loading} // 로딩 중에는 중복 클릭 방지
           >
-            <Text style={styles.startButtonText}>지금 시작하기</Text>
+            {loading ? (
+              <ActivityIndicator color={COLORS.white} />
+            ) : (
+              <Text style={styles.startButtonText}>지금 시작하기</Text>
+            )}
           </TouchableOpacity>
         </View>
 
