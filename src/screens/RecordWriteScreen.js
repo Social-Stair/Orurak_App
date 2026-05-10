@@ -35,8 +35,10 @@ export default function RecordWriteScreen({ navigation }) {
     const [isTimePickerVisible, setTimePickerVisibility] = useState(false);
     const [currentTimeIndex, setCurrentTimeIndex] = useState(null);
 
-    const [startFloor, setStartFloor] = useState('');
-    const [endFloor, setEndFloor] = useState('');
+    // 층수 데이터도 시간과 세트로 묶이기 위해 배열로 변경!
+    const [startFloors, setStartFloors] = useState(['']);
+    const [endFloors, setEndFloors] = useState(['']);
+    
     const [satisfaction, setSatisfaction] = useState(1);
     const [journalText, setJournalText] = useState('');
     const [withFriend, setWithFriend] = useState(false);
@@ -55,32 +57,52 @@ export default function RecordWriteScreen({ navigation }) {
         setIsDropdownOpen(false);
         
         if (method === '출근 안 함') {
-        setRecordTimes(['']);
-        setStartFloor('');
-        setEndFloor('');
-        setSatisfaction(1);
-        setJournalText('');
-        setWithFriend(false);
+            setRecordTimes(['']);
+            setStartFloors(['']);
+            setEndFloors(['']);
+            setSatisfaction(1);
+            setJournalText('');
+            setWithFriend(false);
         } 
         else if (method === '엘리베이터') {
-        setRecordTimes(['']);
-        setStartFloor('');
-        setEndFloor('');
-        setWithFriend(false);
+            setRecordTimes(['']);
+            setStartFloors(['']);
+            setEndFloors(['']);
+            setWithFriend(false);
         }
     };
 
+    // + 버튼 누르면 시간, 시작층, 도착층 모두 세트로 1칸씩 늘어남
     const addTimeInput = () => {
-        if (isStairs) setRecordTimes([...recordTimes, '']);
+        if (!isNotWorking) { 
+            setRecordTimes([...recordTimes, '']);
+            setStartFloors([...startFloors, '']);
+            setEndFloors([...endFloors, '']);
+        }
     };
 
+    // - 버튼 누르면 세트로 지워짐
     const removeTimeInput = (indexToRemove) => {
-        const newTimes = recordTimes.filter((_, index) => index !== indexToRemove);
-        setRecordTimes(newTimes);
+        setRecordTimes(recordTimes.filter((_, index) => index !== indexToRemove));
+        setStartFloors(startFloors.filter((_, index) => index !== indexToRemove));
+        setEndFloors(endFloors.filter((_, index) => index !== indexToRemove));
+    };
+
+    // 개별 층수 업데이트 함수
+    const updateStartFloor = (index, value) => {
+        const newFloors = [...startFloors];
+        newFloors[index] = value;
+        setStartFloors(newFloors);
+    };
+
+    const updateEndFloor = (index, value) => {
+        const newFloors = [...endFloors];
+        newFloors[index] = value;
+        setEndFloors(newFloors);
     };
 
     const showTimePicker = (index) => {
-        if (!isStairs) return;
+        if (isNotWorking) return; // 엘리베이터일 때도 열려야 하므로 isNotWorking으로 검사
         setCurrentTimeIndex(index);
         setTimePickerVisibility(true);
     };
@@ -105,67 +127,60 @@ export default function RecordWriteScreen({ navigation }) {
     };
 
     const handleSubmit = async () => {
-        // 1. 빈칸 검사 로직
-        if (moveMethod === '계단') {
-        const hasEmptyTime = recordTimes.some(time => time === '');
-        if (hasEmptyTime || !startFloor || !endFloor || !journalText) {
-            Alert.alert('알림', '시간, 층수, 성찰 일지를 모두 입력해주세요!');
-            return; 
+        // 1. 빈칸 검사 로직 (계단, 엘리베이터 둘 다 빈칸 검사)
+        if (moveMethod === '계단' || moveMethod === '엘리베이터') {
+            const hasEmptyTime = recordTimes.some(time => time === '');
+            const hasEmptyFloor = startFloors.some(f => f === '') || endFloors.some(f => f === '');
+            
+            if (hasEmptyTime || hasEmptyFloor || !journalText) {
+                Alert.alert('알림', '시간, 층수, 성찰 일지를 모두 입력해주세요!');
+                return; 
+            }
         }
-        } else if (moveMethod === '엘리베이터') {
-        if (!journalText) {
-            Alert.alert('알림', '성찰 일지를 작성해주세요!');
-            return;
-        }
-        }
-        // '출근 안 함'은 검사할 빈칸이 없으므로 바로 통과
 
         setLoading(true);
 
         try {
-        // 2. 선택한 이동 방법에 따른 API 호출
-        if (moveMethod === '계단') {
-            // [계단] 층수 기록 + 성찰 일지 작성
-            const recordsPayload = recordTimes.map((time) => ({
-            fromFloor: parseInt(startFloor, 10),
-            toFloor: parseInt(endFloor, 10),
-            time: time, 
-            withColleague: withFriend
-            }));
+            // 2. 선택한 이동 방법에 따른 API 호출
+            if (moveMethod === '계단') {
+                // 배열로 매핑해서 보냄
+                const recordsPayload = recordTimes.map((time, index) => ({
+                    fromFloor: parseInt(startFloors[index], 10),
+                    toFloor: parseInt(endFloors[index], 10),
+                    time: time, 
+                    withColleague: withFriend
+                }));
 
-            const recordResponse = await recordStairs(recordsPayload); // 층수 기록
-            await createJournal(journalText, parseInt(satisfaction, 10)); // 성찰 일지 등록
+                const recordResponse = await recordStairs(recordsPayload); 
+                await createJournal(journalText, parseInt(satisfaction, 10)); 
 
-            // 달성률 업데이트
-            setAchievementRate(recordResponse.achievementRate || 0);
+                setAchievementRate(recordResponse.achievementRate || 0);
 
-            if (recordResponse.milestone) {
-            setModalTitle(recordResponse.milestone.title);
-            setModalSubText(recordResponse.milestone.body);
-            } else {
-            setModalTitle('수고하셨어요!');
-            setModalSubText('오늘의 건강한 발걸음이 기록되었습니다.\n지금의 좋은 기운을 유지해보세요!');
+                if (recordResponse.milestone) {
+                    setModalTitle(recordResponse.milestone.title);
+                    setModalSubText(recordResponse.milestone.body);
+                } else {
+                    setModalTitle('수고하셨어요!');
+                    setModalSubText('오늘의 건강한 발걸음이 기록되었습니다.\n지금의 좋은 기운을 유지해보세요!');
+                }
+
+            } else if (moveMethod === '엘리베이터') {
+                await createJournal(journalText, parseInt(satisfaction, 10));
+                
+                setModalTitle('일지 작성 완료');
+                setModalSubText('오늘의 성찰 일지가 무사히 기록되었습니다.');
+                setAchievementRate(0); 
+
+            } else if (moveMethod === '출근 안 함') {
+                await skipToday();
+                
+                setModalTitle('설정 완료');
+                setModalSubText('오늘은 푹 쉬시고, 다음 출근 때 뵙겠습니다!');
+                setAchievementRate(0);
             }
 
-        } else if (moveMethod === '엘리베이터') {
-            // [엘리베이터] 성찰 일지만 작성
-            await createJournal(journalText, parseInt(satisfaction, 10));
-            
-            setModalTitle('일지 작성 완료');
-            setModalSubText('오늘의 성찰 일지가 무사히 기록되었습니다.');
-            setAchievementRate(0); // 모달에서 0%로 보이거나, 디자인에 맞게 처리
-
-        } else if (moveMethod === '출근 안 함') {
-            // [출근 안 함] skipToday API 호출
-            await skipToday();
-            
-            setModalTitle('설정 완료');
-            setModalSubText('오늘은 푹 쉬시고, 다음 출근 때 뵙겠습니다!');
-            setAchievementRate(0);
-        }
-
-        // 3. 통신이 모두 성공하면 성공 모달 띄우기
-        setSuccessModalVisible(true);
+            // 3. 통신이 모두 성공하면 성공 모달 띄우기
+            setSuccessModalVisible(true);
 
         } catch (error) {
             console.error("기록 등록 실패:", error);
@@ -232,9 +247,10 @@ export default function RecordWriteScreen({ navigation }) {
                 {recordTimes.map((time, index) => (
                     <View key={index} style={styles.timeInputRow}>
                     <TouchableOpacity 
-                        style={[styles.timeInputWrapper, !isStairs && styles.disabledInput]}
+                        // 엘리베이터도 활성화되도록 !isStairs 대신 isNotWorking 사용
+                        style={[styles.timeInputWrapper, isNotWorking && styles.disabledInput]}
                         onPress={() => showTimePicker(index)}
-                        disabled={!isStairs}
+                        disabled={isNotWorking}
                     >
                         <Text style={[styles.timeInputText, !time && styles.placeholderText]}>
                         {time || "예) 오후 12:00"}
@@ -243,9 +259,9 @@ export default function RecordWriteScreen({ navigation }) {
                     
                     {index === recordTimes.length - 1 ? (
                         <TouchableOpacity 
-                        style={[styles.plusButton, !isStairs && { backgroundColor: COLORS.gray }]} 
+                        style={[styles.plusButton, isNotWorking && { backgroundColor: COLORS.gray }]} 
                         onPress={addTimeInput}
-                        disabled={!isStairs}
+                        disabled={isNotWorking}
                         >
                         <Feather name="plus" size={24} color={COLORS.white} />
                         </TouchableOpacity>
@@ -271,28 +287,31 @@ export default function RecordWriteScreen({ navigation }) {
                 </View>
 
                 <View style={styles.inputGroup}>
-                <Text style={styles.sectionTitle}>몇 층부터 몇 층까지 계단을 오르셨나요?</Text>
-                <View style={styles.floorInputRow}>
-                    <TextInput
-                    style={[styles.floorInput, !isStairs && styles.disabledInput]}
-                    placeholder="예) 1층"
-                    placeholderTextColor={COLORS.gray}
-                    value={startFloor}
-                    onChangeText={setStartFloor}
-                    editable={isStairs}
-                    keyboardType="numeric"
-                    />
-                    <Text style={styles.arrowText}>→</Text>
-                    <TextInput
-                    style={[styles.floorInput, !isStairs && styles.disabledInput]}
-                    placeholder="예) 12층"
-                    placeholderTextColor={COLORS.gray}
-                    value={endFloor}
-                    onChangeText={setEndFloor}
-                    editable={isStairs}
-                    keyboardType="numeric"
-                    />
-                </View>
+                <Text style={styles.sectionTitle}>몇 층부터 몇 층까지 올라가셨나요?</Text>
+                {/* 시간이 추가된 개수만큼 층수 입력창도 반복 생성 */}
+                {recordTimes.map((_, index) => (
+                    <View key={index} style={[styles.floorInputRow, index > 0 && { marginTop: 12 }]}>
+                        <TextInput
+                        style={[styles.floorInput, isNotWorking && styles.disabledInput]}
+                        placeholder="예) 1층"
+                        placeholderTextColor={COLORS.gray}
+                        value={startFloors[index]}
+                        onChangeText={(val) => updateStartFloor(index, val)}
+                        editable={!isNotWorking}
+                        keyboardType="numeric"
+                        />
+                        <Text style={styles.arrowText}>→</Text>
+                        <TextInput
+                        style={[styles.floorInput, isNotWorking && styles.disabledInput]}
+                        placeholder="예) 12층"
+                        placeholderTextColor={COLORS.gray}
+                        value={endFloors[index]}
+                        onChangeText={(val) => updateEndFloor(index, val)}
+                        editable={!isNotWorking}
+                        keyboardType="numeric"
+                        />
+                    </View>
+                ))}
                 </View>
 
                 <View style={styles.inputGroup}>

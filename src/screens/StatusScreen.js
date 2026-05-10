@@ -87,10 +87,10 @@ export default function StatusScreen() {
               
               {/* 전체 프로그레스 바 (100% 초과 방지) */}
               <View style={styles.totalProgressBg}>
-                <View style={[styles.totalProgressFill, { width: `${Math.min(sharedGoal.achievementRate, 100)}%` }]}>
-                  <View style={styles.totalProgressThumb} />
-                </View>
-              </View>
+              <View style={[styles.totalProgressFill, { width: `${Math.min(sharedGoal.achievementRate, 100)}%` }]} />
+              {/* 썸(동그라미) 제거 & 가림막 추가 */}
+              <View style={styles.totalProgressMask} />
+            </View>
             </View>
 
             {/* 2-2. 하얀색 팀원 리스트 영역 */}
@@ -186,28 +186,27 @@ const styles = StyleSheet.create({
   
   /* 전체 프로그레스 바 스타일 */
   totalProgressBg: {
-    height: 4,
-    backgroundColor: '#EDF1FF',
-    borderRadius: 2,
+    height: 32,
+    backgroundColor: '#3F5DC8',
+    borderRadius: 0,
     position: 'relative',
-    justifyContent: 'center',
+    overflow: 'hidden',
   },
   totalProgressFill: {
-    height: 4,
+    height: '100%',
     backgroundColor: '#4AD8FF',
-    borderRadius: 2,
     position: 'absolute',
     left: 0,
     top: 0,
   },
-  totalProgressThumb: {
-    width: 8,
-    height: 8,
-    backgroundColor: '#4AD8FF',
-    borderRadius: 4,
+  totalProgressMask: {
     position: 'absolute',
-    right: -4,
-    top: -2,
+    top: -30,
+    left: '-20%',
+    width: '120%',
+    height: 40,
+    backgroundColor: COLORS.primary,
+    transform: [{ rotate: '-5deg' }],
   },
 
   /* 하단 팀원 리스트 */

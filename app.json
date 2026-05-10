@@ -17,7 +17,8 @@
         "foregroundImage": "./assets/images/logo.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.godjihun.orurakapp"
     },
     "web": {
       "output": "static",
@@ -30,6 +31,11 @@
     "plugins": [
       "@react-native-community/datetimepicker",
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "469ec69b-3e3f-4be9-889a-d7b59813ddac"
+      }
+    }
   }
 }

@@ -171,6 +171,8 @@ export default function HomeScreen() {
           <View style={styles.progressContainer}>
             <View style={styles.progressBackground}>
               <View style={[styles.progressFill, { width: `${Math.min(goalData.achievementRate, 100)}%` }]} />
+              
+              <View style={styles.progressMask} />
             </View>
             <View style={styles.progressTextRow}>
               <Text style={styles.progressLabel}>주간 목표</Text>
@@ -283,15 +285,25 @@ const styles = StyleSheet.create({
     // marginBottom: 16,
   },
   progressBackground: {
-    height: 8,
+    height: 32, 
     backgroundColor: '#3F5DC8',
-    borderRadius: 120,
+    borderRadius: 0,
     marginBottom: 10,
+    overflow: 'hidden',
+    position: 'relative',
   },
   progressFill: {
     height: '100%',
     backgroundColor: '#4AD8FF',
-    borderRadius: 120,
+  },
+  progressMask: {
+    position: 'absolute',
+    top: -30,
+    left: '-20%',
+    width: '120%',
+    height: 40,
+    backgroundColor: COLORS.primary,
+    transform: [{ rotate: '-4deg' }], 
   },
   progressTextRow: {
     flexDirection: 'row',

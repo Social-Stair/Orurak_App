@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -20,32 +20,83 @@ import SuccessModal from '../components/SuccessModal';
 import { COLORS } from '../constants/colors';
 import { TYPOGRAPHY } from '../constants/typography';
 
-// API 함수 불러오기
-import { deleteJournal, updateJournal } from '../api/socialStairApi';
+// getRecords API 추가!
+import { deleteJournal, getRecords, updateJournal } from '../api/socialStairApi';
 
 export default function RecordDetailScreen({ route, navigation }) {
   const { journalData } = route.params || {};
 
-  // [조회 전용 데이터] - 수정 불가
-  const [moveMethod] = useState('계단'); 
-  const [recordTimes] = useState(['오전 09:00']); 
-  const [startFloor] = useState('1');
-  const [endFloor] = useState('12');
-  const [withFriend] = useState(true);
+  // 데이터 로딩 상태
+  const [isLoadingRecords, setIsLoadingRecords] = useState(true);
 
-  // [수정 가능 데이터] - 성찰 일지와 만족도
+  // [조회 전용 데이터] - 서버에서 불러와서 세팅할 상태들
+  const [moveMethod, setMoveMethod] = useState('엘리베이터/출근 안 함'); // 기본값
+  const [recordTimes, setRecordTimes] = useState([]); 
+  const [startFloors, setStartFloors] = useState([]);
+  const [endFloors, setEndFloors] = useState([]);
+  const [withFriend, setWithFriend] = useState(false);
+
+  // [수정 가능 데이터] - 성찰 일지와 만족도 (이건 journalData에 제대로 들어있음)
   const [satisfaction, setSatisfaction] = useState(journalData?.satisfaction || 1);
   const [journalText, setJournalText] = useState(journalData?.content || '');
   
   const [isSuccessModalVisible, setSuccessModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 변경 여부 확인 (수정 완료 버튼 활성화용)
+  const isNotWorking = moveMethod === '엘리베이터/출근 안 함';
+
   const hasChanges = 
     satisfaction !== journalData?.satisfaction ||
     journalText !== journalData?.content;
 
-  // 삭제 로직
+  // 화면이 열릴 때 계단 기록 API를 찔러서 현재 일지 날짜와 매칭하기
+  useEffect(() => {
+    const fetchMatchingStairsData = async () => {
+      try {
+        // 1. 전체 계단 기록 불러오기
+        const stairsResponse = await getRecords();
+        const targetDate = journalData?.date; // 예: "2025-04-07"
+
+        if (stairsResponse && stairsResponse.records && targetDate) {
+          // 2. 현재 일지와 날짜가 같은 계단 기록 찾기
+          const matchedRecord = stairsResponse.records.find(r => {
+            // Timestamp를 YYYY-MM-DD 형태로 변환해서 비교
+            if (!r.createdAt) return false;
+            
+            let recordDate = '';
+            if (r.createdAt._seconds) {
+              recordDate = new Date(r.createdAt._seconds * 1000).toISOString().split('T')[0];
+            } else {
+              recordDate = new Date(r.createdAt).toISOString().split('T')[0];
+            }
+            return recordDate === targetDate;
+          });
+
+          // 3. 매칭되는 계단 기록이 있다면 (계단을 이용한 날)
+          if (matchedRecord && matchedRecord.records && matchedRecord.records.length > 0) {
+            setMoveMethod('계단');
+            
+            // 입력한 개수만큼 배열을 풀어서 세팅
+            const times = matchedRecord.records.map(item => item.time || '시간 정보 없음');
+            const starts = matchedRecord.records.map(item => String(item.fromFloor || '0'));
+            const ends = matchedRecord.records.map(item => String(item.toFloor || '0'));
+            
+            setRecordTimes(times);
+            setStartFloors(starts);
+            setEndFloors(ends);
+            setWithFriend(matchedRecord.records[0]?.withColleague ?? false);
+          }
+        }
+      } catch (error) {
+        console.error("계단 기록 불러오기 실패:", error);
+      } finally {
+        setIsLoadingRecords(false);
+      }
+    };
+
+    fetchMatchingStairsData();
+  }, [journalData]);
+
   const handleDelete = () => {
     Alert.alert('기록 삭제', '정말로 이 일지를 삭제하시겠어요?', [
       { text: '취소', style: 'cancel' },
@@ -69,7 +120,6 @@ export default function RecordDetailScreen({ route, navigation }) {
     ]);
   };
 
-  // 수정 로직
   const handleEdit = async () => {
     setLoading(true);
     try {
@@ -104,38 +154,66 @@ export default function RecordDetailScreen({ route, navigation }) {
 
           <View style={styles.formContainer}>
             
-            {/* 1. 이동 방법 (조회 전용) */}
             <View style={styles.inputGroup}>
-              <Text style={styles.sectionTitle}>이동 방법</Text>
+              <Text style={styles.sectionTitle}>어떤 이동 방법을 선택하셨나요?</Text>
               <View style={styles.disabledDropdownBox}>
-                <Text style={styles.disabledText}>{moveMethod}</Text>
+                {isLoadingRecords ? (
+                  <ActivityIndicator color={COLORS.primary} size="small" />
+                ) : (
+                  <Text style={styles.disabledText}>{moveMethod}</Text>
+                )}
                 <Feather name="lock" size={18} color={COLORS.gray} />
               </View>
             </View>
 
-            {/* 2. 시간 (조회 전용) */}
+            {/* 서버에서 불러온 여러 개의 시간 데이터 렌더링 */}
             <View style={styles.inputGroup}>
-              <Text style={styles.sectionTitle}>이동 시간</Text>
-              {recordTimes.map((time, index) => (
-                <View key={index} style={styles.disabledInputBox}>
-                  <Text style={styles.disabledText}>{time}</Text>
+              <Text style={styles.sectionTitle}>언제 오르셨나요?</Text>
+              {isLoadingRecords ? (
+                <View style={styles.disabledInputBox}><ActivityIndicator color={COLORS.primary} size="small" /></View>
+              ) : recordTimes.length === 0 ? (
+                <View style={styles.disabledInputBox}><Text style={[styles.disabledText, { opacity: 0.5 }]}>기록 없음</Text></View>
+              ) : (
+                recordTimes.map((time, index) => (
+                  <View key={index} style={[styles.disabledInputBox, index > 0 && { marginTop: 8 }]}>
+                    <Text style={styles.disabledText}>{time}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+
+            {/* 서버에서 불러온 여러 개의 층수 데이터 렌더링 */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.sectionTitle}>몇 층부터 몇 층까지 오르셨나요?</Text>
+              {isLoadingRecords ? (
+                <View style={styles.floorRow}>
+                  <View style={styles.disabledFloorBox}><ActivityIndicator color={COLORS.primary} size="small" /></View>
+                  <Text style={styles.arrowText}>→</Text>
+                  <View style={styles.disabledFloorBox}><ActivityIndicator color={COLORS.primary} size="small" /></View>
                 </View>
-              ))}
+              ) : recordTimes.length === 0 ? (
+                <View style={styles.floorRow}>
+                  <View style={styles.disabledFloorBox}><Text style={[styles.disabledText, { opacity: 0.5 }]}>-</Text></View>
+                  <Text style={styles.arrowText}>→</Text>
+                  <View style={styles.disabledFloorBox}><Text style={[styles.disabledText, { opacity: 0.5 }]}>-</Text></View>
+                </View>
+              ) : (
+                recordTimes.map((_, index) => (
+                  <View key={index} style={[styles.floorRow, index > 0 && { marginTop: 12 }]}>
+                    <View style={styles.disabledFloorBox}>
+                      <Text style={styles.disabledText}>{startFloors[index]}층</Text>
+                    </View>
+                    <Text style={styles.arrowText}>→</Text>
+                    <View style={styles.disabledFloorBox}>
+                      <Text style={styles.disabledText}>{endFloors[index]}층</Text>
+                    </View>
+                  </View>
+                ))
+              )}
             </View>
 
-            {/* 3. 층수 (조회 전용) */}
             <View style={styles.inputGroup}>
-              <Text style={styles.sectionTitle}>이용 층수</Text>
-              <View style={styles.floorRow}>
-                <View style={styles.disabledFloorBox}><Text style={styles.disabledText}>{startFloor}층</Text></View>
-                <Text style={styles.arrowText}>→</Text>
-                <View style={styles.disabledFloorBox}><Text style={styles.disabledText}>{endFloor}층</Text></View>
-              </View>
-            </View>
-
-            {/* 4. 만족도 (수정 가능) */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.sectionTitle}>이 기록이 만족스러웠나요?</Text>
+              <Text style={styles.sectionTitle}>이동 방법은 나의 의지에 따른 선택이었나요?</Text>
               <View style={styles.satisfactionWrapper}>
                 <Slider
                   style={styles.slider}
@@ -146,7 +224,7 @@ export default function RecordDetailScreen({ route, navigation }) {
                   onValueChange={(val) => setSatisfaction(val)}
                   minimumTrackTintColor={COLORS.primary}
                   maximumTrackTintColor="#DBDEE6"
-                  thumbTintColor={COLORS.primary} 
+                  thumbTintColor={COLORS.primary}
                 />
                 <View style={styles.satisfactionDotsRow}>
                   {[1, 2, 3, 4, 5, 6, 7].map((num) => (
@@ -156,7 +234,6 @@ export default function RecordDetailScreen({ route, navigation }) {
               </View>
             </View>
 
-            {/* 5. 성찰 일지 (수정 가능) */}
             <View style={styles.inputGroup}>
               <Text style={styles.sectionTitle}>성찰 일지</Text>
               <TextInput
@@ -167,13 +244,14 @@ export default function RecordDetailScreen({ route, navigation }) {
                 onChangeText={setJournalText}
               />
               
-              {/* 동료 여부 (조회 전용) */}
-              <View style={styles.disabledCheckboxRow}>
-                <View style={[styles.checkbox, withFriend && styles.checkboxActive]}>
-                  {withFriend && <Feather name="check" size={12} color={COLORS.white} />}
+              {moveMethod === '계단' && (
+                <View style={styles.disabledCheckboxRow}>
+                  <View style={[styles.checkbox, withFriend && styles.checkboxActive]}>
+                    {withFriend && <Feather name="check" size={12} color={COLORS.white} />}
+                  </View>
+                  <Text style={styles.disabledCheckboxText}>친구와 함께 올랐어요!</Text>
                 </View>
-                <Text style={styles.disabledCheckboxText}>친구와 함께 올랐어요!</Text>
-              </View>
+              )}
             </View>
 
           </View>
@@ -230,18 +308,15 @@ const styles = StyleSheet.create({
   disabledText: { fontFamily: 'Pretendard-Medium', fontSize: 14, color: COLORS.gray },
   arrowText: { color: COLORS.gray, fontSize: 18 },
 
-  // 수정 가능한 일지 입력창
   journalInput: {
     height: 120, backgroundColor: COLORS.white, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, padding: 16, fontFamily: 'Pretendard-Medium', fontSize: 14, color: COLORS.black,
   },
   
-  // 만족도 슬라이더
   satisfactionWrapper: { marginTop: 10 },
   slider: { width: '100%', height: 40 },
   satisfactionDotsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14 },
   scoreNumber: { fontFamily: 'Pretendard-Medium', fontSize: 12, color: COLORS.gray },
 
-  // 체크박스 (비활성화)
   disabledCheckboxRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, opacity: 0.6, justifyContent: 'center',},
   checkbox: { width: 18, height: 18, borderWidth: 1, borderColor: COLORS.gray, borderRadius: 4, justifyContent: 'center', alignItems: 'center' },
   checkboxActive: { backgroundColor: COLORS.gray, borderColor: COLORS.gray },
